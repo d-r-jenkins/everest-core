@@ -13,6 +13,7 @@ cargo_build_script(
     data= [
         "//types:types",
         "//interfaces:interfaces",
+        "//interfaces:errors",
         "manifest.yaml",
     ],
 )
