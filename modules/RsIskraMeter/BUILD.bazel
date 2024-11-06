@@ -13,6 +13,7 @@ cargo_build_script(
         "manifest.yaml",
         "@everest-core//interfaces",
         "@everest-core//types",
+        "@everest-core//errors",
     ],
     deps = all_crate_deps(build = True),
 )
