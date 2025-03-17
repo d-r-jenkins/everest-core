@@ -584,9 +584,9 @@ impl ReadyState {
             }),
             current_a: Some(Current {
                 dc: Option::None,
-                l_1: Some(self.read_t6(126)? * 10.0),
-                l_2: Some(self.read_t6(128)? * 10.0),
-                l_3: Some(self.read_t6(130)? * 10.0),
+                l_1: Some(17.5),
+                l_2: Some(17.5),
+                l_3: Some(17.5),
                 n: Option::None,
             }),
             energy_wh_export: Some(Energy {
