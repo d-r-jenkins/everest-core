@@ -1,0 +1,6 @@
+description: >-
+  Errors for PaymentTerminal
+errors:
+  - name: TerminalIdNotSet
+    description: >-
+      The terminal identified has not been set properly

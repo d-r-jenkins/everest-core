@@ -30,6 +30,7 @@
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 use anyhow::Result;
+use generated::errors::payment_terminal::{Error as PTError, PaymentTerminalError};
 use generated::types::{
     authorization::{AuthorizationType, IdToken, IdTokenType, ProvidedIdToken},
     money::MoneyAmount,
@@ -123,6 +124,11 @@ mod sync_feig {
             let mut inner = self.inner.lock().unwrap();
             self.rt.block_on(inner.commit_transaction(token, amount))
         }
+
+        pub fn update_terminal_id(&self) -> Result<bool> {
+            let mut inner = self.inner.lock().unwrap();
+            self.rt.block_on(inner.update_terminal_id())
+        }
     }
 }
 
@@ -144,7 +150,7 @@ impl ProvidedIdToken {
             },
             authorization_type,
             certificate: None,
-            connectors: connectors,
+            connectors,
             iso_15118_certificate_hash_data: None,
             prevalidated: None,
             request_id: None,
@@ -356,6 +362,18 @@ impl OnReadySubscriber for PaymentTerminalModule {
     fn on_ready(&self, publishers: &ModulePublisher) {
         // Send the publishers to the main thread.
         self.tx.send(publishers.clone()).unwrap();
+        let res = self.feig.update_terminal_id();
+        if let Err(inner) = res {
+            if let Some(specific_error) = inner.downcast_ref::<Error>() {
+                if *specific_error == Error::TidMismatch {
+                    publishers
+                        .payment_terminal
+                        .raise_error(PTError::PaymentTerminal(
+                            PaymentTerminalError::TerminalIdNotSet,
+                        ));
+                }
+            }
+        }
     }
 }
 
