@@ -43,6 +43,7 @@ use generated::{
     SessionCostClientSubscriber,
 };
 use std::collections::HashMap;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{mpsc::channel, mpsc::Sender, Arc, Mutex};
 use std::time::Duration;
 use std::{net::Ipv4Addr, str::FromStr};
@@ -51,6 +52,8 @@ use zvt_feig_terminal::config::{Config, FeigConfig};
 use zvt_feig_terminal::feig::{CardInfo, Error};
 
 mod sync_feig {
+    use std::sync::atomic::AtomicBool;
+
     use anyhow::Result;
     use zvt_feig_terminal::{
         config::Config,
@@ -63,6 +66,11 @@ mod sync_feig {
 
         /// The async impl of the Feig.
         inner: std::sync::Mutex<Feig>,
+
+        /// Did the terminal configuration fail
+        /// We still read cards even if this is set, as in most
+        /// cases the terminal can still function as an RFID reader
+        pub configuration_failed: AtomicBool,
     }
 
     /// Sync interface for the Feig.
@@ -83,6 +91,7 @@ mod sync_feig {
                 .build()
                 .unwrap();
 
+            let mut configuration_failed = false;
             // Create the Feig terminal itself.
             let feig = rt.block_on(async {
                 loop {
@@ -94,6 +103,7 @@ mod sync_feig {
                         }
                         Err(e) => {
                             log::warn!("Payment terminal not initialized {:?}", e);
+                            configuration_failed = true;
                         }
                     }
                 }
@@ -102,6 +112,7 @@ mod sync_feig {
             Self {
                 rt,
                 inner: std::sync::Mutex::new(feig),
+                configuration_failed: configuration_failed.into(),
             }
         }
 
@@ -362,16 +373,23 @@ impl OnReadySubscriber for PaymentTerminalModule {
     fn on_ready(&self, publishers: &ModulePublisher) {
         // Send the publishers to the main thread.
         self.tx.send(publishers.clone()).unwrap();
-        let res = self.feig.update_terminal_id();
-        if let Err(inner) = res {
-            if let Some(specific_error) = inner.downcast_ref::<Error>() {
-                if *specific_error == Error::TidMismatch {
-                    publishers
-                        .payment_terminal
-                        .raise_error(PTError::PaymentTerminal(
-                            PaymentTerminalError::TerminalIdNotSet,
-                        ));
-                }
+        if self.feig.configuration_failed.load(Relaxed) {
+            if let Err(inner) = self.feig.update_terminal_id() {
+                let err = match inner.downcast_ref::<Error>() {
+                    Some(inner_err) => match inner_err {
+                        Error::TidMismatch => PaymentTerminalError::TerminalIdNotSet,
+                        _ => PaymentTerminalError::GenericPaymentTerminalError,
+                    },
+                    None => {
+                        log::error!("Error from update_terminal_id contains data that cannot be cast to an Error");
+                        PaymentTerminalError::GenericPaymentTerminalError
+                    }
+                };
+                publishers
+                    .payment_terminal
+                    .raise_error(PTError::PaymentTerminal(err));
+            } else {
+                self.feig.configuration_failed.store(false, Relaxed)
             }
         }
     }
